@@ -51,7 +51,7 @@ GRIP consists of a wearable sensing module and a host-side software pipeline:
 ### 1) Firmware (ESP8266)
 Use the main integrated firmware:
 
-- **[`firmware/imu_ir_send/imu_ir_send.ino`](./firmware/imu_ir_send/imu_ir_send.ino)**
+- **[`firmmware/imu_ir_send/imu_ir_send.ino`](./firmmware/imu_ir_send/imu_ir_send.ino)**
 
 Make sure you set:
 - Wi-Fi SSID / password  
