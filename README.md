@@ -1,91 +1,98 @@
 # GRIP  
 **Gesture Recognition via Integrated PPG**
 
-GRIP is a wireless gesture recognition system that integrates
-photoplethysmography (PPG) and inertial measurement unit (IMU) sensors
+GRIP is a wireless gesture recognition and input system that integrates
+photoplethysmography (PPG) and an inertial measurement unit (IMU)
 to capture fine-grained hand and grip intentions.
-The system enables intuitive human–computer interaction for
+It enables intuitive human–computer interaction for
 VR/AR, precision robotics, and rehabilitation applications.
 
 ---
 
 ## Motivation
 
-Conventional wireless input devices and gesture controllers rely
-primarily on IMU-based motion tracking.
-While effective for orientation and gross movement, IMU-only systems
-suffer from drift, noise, and limited ability to directly capture
-user intention such as grip or click actions.
+Conventional gesture controllers rely primarily on IMU-based motion tracking.
+While effective for orientation and gross movement, IMU-only approaches can suffer from
+drift, noise, and limited ability to directly capture **user intention**
+(e.g., grip/click actions).
 
-GRIP addresses this limitation by integrating PPG sensing,
-allowing physiological signals related to muscle contraction and blood
-volume changes to be used as an additional interaction modality.
-This enables more intuitive, robust, and intention-aware input.
+GRIP addresses this limitation by integrating PPG sensing as an additional modality.
+Physiological signals related to grip (e.g., blood volume changes and muscle activity effects)
+can complement IMU motion information, enabling more intention-aware input.
 
 ---
 
 ## System Overview
 
-GRIP consists of a wearable wireless sensing module and a host-side
-software pipeline:
+GRIP consists of a wearable sensing module and a host-side software pipeline:
 
-- **PPG sensor**  
-  Detects grip and click-related physiological signals
-- **IMU (MPU)**  
-  Captures 3D orientation and motion
-- **ESP8266 (WeMos D1 mini)**  
-  Performs sensor fusion and transmits data wirelessly via UDP
+- **Wearable module (ESP8266 + sensors)**  
+  Collects IMU orientation/motion and PPG(IR) signals and streams data via UDP
 - **Host PC (Python)**  
-  Receives data, visualizes motion, and maps gestures to input events
+  Receives data, visualizes motion, and maps gestures to mouse/input events
 
 ---
 
-## Hardware Components
+## Repository Structure
 
-- ESP8266 (WeMos D1 mini)
-- PPG sensor (IR-based)
-- IMU (MPU series)
-- Battery-powered wearable form factor
-
----
-
-## Software Architecture
-
-### Embedded Firmware (ESP8266)
-- Sensor acquisition (PPG + IMU)
-- Basic preprocessing
-- UDP packet transmission over Wi-Fi
-
-### Host-side Software (Python)
-- UDP data reception
-- Real-time visualization (2D / 3D)
-- Gesture interpretation
-- Mouse / input control experiments
-
-Multiple experimental scripts were developed to test:
-- IMU-only tracking
-- PPG-assisted gesture detection
-- 3D orientation visualization
-- Wireless latency and stability
+- **[`firmware/`](./firmware)**  
+  ESP8266/Arduino firmware modules (UDP streaming, IMU+PPG integration, diagnostics)
+- **[`host/`](./host)**  
+  Python receiver + visualization + mouse control scripts  
+- **[`hardware/`](./hardware)**  
+  Hardware notes, wiring, and future documentation (placeholder)
+- **[`docs/`](./docs)**  
+  Slides, images, and documentation assets (placeholder)
 
 ---
 
-## Experimental Files (Current State)
+## Quick Start
 
-This repository contains multiple experimental and iterative files,
-reflecting the development and testing process:
+### 1) Firmware (ESP8266)
+Use the main integrated firmware:
 
-- **ESP8266 firmware**
-  - IMU-only transmission
-  - PPG + IMU integrated transmission
-  - UDP-based wireless streaming
-- **Python scripts**
-  - UDP receiver variants
-  - 2D/3D plotting and visualization
-  - Custom gesture and input mapping tests
+- **[`firmware/imu_ir_send/imu_ir_send.ino`](./firmware/imu_ir_send/imu_ir_send.ino)**
 
-File naming reflects versioned experiments rather than final structure.
-Folder reorganization and cleanup are planned as future work.
+Make sure you set:
+- Wi-Fi SSID / password  
+- Host PC IP address and UDP port
+
+### 2) Host (PC)
+Run the final integrated host application:
+
+- **[`host/GRIP.py`](./host/GRIP.py)**
+
+This program:
+- visualizes the Z-axis direction in VPython,
+- calibrates monitor mapping (4 corners),
+- calibrates fist (IR) thresholds,
+- controls mouse movement and click.
+
+---
+
+## Network Debugging (Recommended)
+
+If UDP reception is unstable, validate the network first:
+
+1. Flash **[`firmware/wifi_udp_send/wifi_udp_send.ino`](./firmware/wifi_udp_send/wifi_udp_send.ino)**
+2. Run **[`host/test_wifi.py`](./host/test_wifi.py)**
+
+Once `"HELLO_FROM_D1_MINI"` is received reliably, switch back to `imu_ir_send.ino`.
+
+---
+
+## Key Modules
+
+### Firmware
+- **`imu_ir_send`**: main IMU + IR(PPG) integrated UDP sender (reference firmware)
+- **`ppg_imu`**: sensor validation (raw IMU + PPG via Serial Plotter)
+- **`wifi_udp_send`**: minimal Wi-Fi/UDP diagnostic sender
+
+### Host
+- **`GRIP.py`**: final integrated pipeline (visualization + calibration + mouse control)
+- **`GRIP_test.py`**: alternative experimental pipeline (kept for reference)
+- **`fist_space.py`**: standalone fist(IR) calibration + gesture prototype
+- **`plot_integrated_xyz.py`**: deprecated experiment (double-integration drift)
 
 ---
 
@@ -100,22 +107,22 @@ Folder reorganization and cleanup are planned as future work.
 
 ## Key Contributions
 
-- Integration of PPG sensing for gesture and grip intention recognition
-- Wireless UDP-based low-latency input pipeline
-- Exploration of physiological signals as an alternative to button-based input
-- Experimental validation through multiple visualization and control prototypes
+- Integrated PPG(IR) sensing to capture grip/click intention beyond IMU-only tracking
+- Low-latency UDP-based wireless sensing pipeline (ESP8266 → PC)
+- Real-time visualization and input control prototype (VPython + mouse mapping)
+- Practical calibration flow for display mapping and fist thresholds
 
 ---
 
 ## Limitations and Future Work
 
-- Current implementation focuses on proof-of-concept experiments
-- Signal processing and classification are rule-based
+- Current implementation is a proof-of-concept prototype
+- Gesture logic is primarily rule-based (thresholding)
 - Future work includes:
-  - Improved signal filtering and feature extraction
-  - Machine learning–based gesture classification
-  - Hardware miniaturization
-  - Formal latency and accuracy evaluation
+  - improved filtering and feature extraction,
+  - ML-based gesture classification,
+  - hardware miniaturization,
+  - formal latency/accuracy evaluation.
 
 ---
 
