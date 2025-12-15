@@ -122,3 +122,16 @@ Folder reorganization and cleanup are planned as future work.
 ## License
 
 This project is released under the MIT License.
+
+---
+
+## Contributors
+
+- **Paul Sim**  
+  System design, ESP8266 firmware development, wireless UDP communication,  
+  Python-based visualization and input control
+
+- **Yeji Seo**  
+  PPG sensor integration, physiological signal experimentation,  
+  gesture and grip interaction concept development  
+  (seo040824@g.skku.edu)
