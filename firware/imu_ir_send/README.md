@@ -55,6 +55,7 @@ const char* ssid       = "YOUR_WIFI_SSID";
 const char* password   = "YOUR_WIFI_PASSWORD";
 const char* udpAddress = "PC_IP_ADDRESS";
 const int   udpPort    = 9000;
+```
 ---
 
 ## Network Debugging and Validation
