@@ -1,29 +1,57 @@
-# 주먹 쥐는 것을 5초간 반복해서 보정하는 방법
+# 주먹 쥠 3번 이후 캘리브레이션 시작,
+# 캘리브레이션 후 주먹 쥐었다 폈다 하면 스페이스바 입력
 
 import socket
 import time
 import keyboard  # pip install keyboard
 
+# ===== UDP 수신 설정 =====
 UDP_IP = "0.0.0.0"
 UDP_PORT = 9000
 
-MIN_IR_CONTACT = 10000   # 이 값보다 작으면 접촉 X로 보고 무시
-CALIB_DURATION = 5.0     # 캘리브레이션 시간 (초)
-
-# ==== UDP 소켓 설정 ====
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind((UDP_IP, UDP_PORT))
 
 print(f"UDP 수신 대기중... (포트 {UDP_PORT})")
 
+# ===== 공통 상수 =====
+MIN_IR_CONTACT = 10000   # 이 값 미만이면 센서 접촉 X로 보고 무시
+
+# ===== 트리플 FIST 트리거용 파라미터 (대략적인 값) =====
+PRE_ALPHA_BASELINE = 0.01    
+PRE_THRESH_HIGH = 2000.0
+PRE_THRESH_LOW = 1000.0
+PRE_MIN_GESTURE_INTERVAL = 0.2  # 너무 빠른 중복 인식 방지
+TRIGGER_COUNT = 3
+TRIGGER_WINDOW = 2.5            # 이 시간 안에 FIST 3번 → 캘리 시작
+
+# ===== 캘리브레이션 설정 =====
+CALIB_DURATION = 7.0            # 5초 동안 IR 수집해서 분석
+
+# ===== 상태 =====
+mode = "WAIT_TRIGGER"           # "WAIT_TRIGGER" / "RUN"
+pre_state = "IDLE"
+pre_baseline_ir = None
+pre_last_trigger_time = 0.0
+trigger_times = []              # 트리거용 FIST 완료 시간들
+
+# 실전 모드용 상태
+state = "IDLE"
+baseline_ir = None
+ALPHA_BASELINE = 0.01           # 실전 모드에서 baseline 추적 속도
+THRESH_HIGH = 1500.0            # 캘리 후 덮어씀
+THRESH_LOW = 800.0
+MIN_GESTURE_INTERVAL = 0.5
+last_trigger_time = 0.0         # 마지막 space 입력 시간
+
 
 def recv_one_packet():
-    """UDP 패킷 하나 받아서 파싱해 IR 값을 리턴"""
+    """UDP 패킷 하나 받고 (t_ms, ir) 반환. 실패하면 (None, None)"""
     data, addr = sock.recvfrom(1024)
     msg = data.decode("utf-8", errors="ignore").strip()
     parts = msg.split(",")
     if len(parts) != 11:
-        return None, None  # 패킷 이상
+        return None, None
     try:
         t_ms = int(parts[0])
         ir = int(parts[7])
@@ -33,62 +61,55 @@ def recv_one_packet():
 
 
 def calibrate_ir():
-    """5초 동안 주먹 쥐었다 펴기를 반복하게 해서
-    baseline, THRESH_HIGH, THRESH_LOW, MIN_GESTURE_INTERVAL를 자동 추정"""
+    """5초 동안 IR 수집해서 baseline / peak / THRESH / MIN_INTERVAL 추정"""
     print("\n=== IR 캘리브레이션 시작 ===")
-    print("5초 동안 편하게 주먹을 '쥐었다-폈다' 반복해 주세요.")
-    print("준비되면 아무 키나 누르세요.")
-    input()
+    print("지금부터 약 5초 동안 주먹을 쥐었다-폈다를 몇 번 반복해 주세요.\n")
 
     t0 = time.time()
     ir_list = []
-    time_list = []
+    t_list = []
 
-    # 5초 동안 데이터 수집
     while time.time() - t0 < CALIB_DURATION:
         t_ms, ir = recv_one_packet()
         if t_ms is None:
             continue
         if ir < MIN_IR_CONTACT:
-            # 접촉 안 된 상황은 캘리브레이션에 사용하지 않음
+            # 접촉 안 된 구간은 사용하지 않음
             continue
 
         t_sec = t_ms / 1000.0
         ir_list.append(ir)
-        time_list.append(t_sec)
+        t_list.append(t_sec)
 
     if len(ir_list) < 10:
-        print("캘리브레이션에 데이터가 너무 적습니다. 다시 시도하세요.")
+        print("캘리브레이션 데이터가 너무 적습니다. 다시 시도해주세요.")
         return None
 
-    # ---- baseline (손 편 상태) / peak (주먹 쥘 때) 추정 ----
     ir_sorted = sorted(ir_list)
     n = len(ir_sorted)
 
-    # 하위 20% 평균 → baseline 쪽
+    # baseline: 하위 20% 평균
     low_slice = ir_sorted[:max(1, n // 5)]
     baseline = sum(low_slice) / len(low_slice)
 
-    # 상위 20% 평균 → 주먹 쥘 때 쪽
+    # peak: 상위 20% 평균
     high_slice = ir_sorted[-max(1, n // 5):]
     peak = sum(high_slice) / len(high_slice)
 
-    delta = max(peak - baseline, 1.0)  # 최소 1 이상
+    delta = max(peak - baseline, 1.0)
 
-    # THRESH 설정 (baseline 상대)
-    THRESH_HIGH = delta * 0.6
-    THRESH_LOW = delta * 0.4
+    # threshold는 delta 비율로 설정
+    TH = delta * 0.6
+    TL = delta * 0.4
 
-    # ---- 제스처 주기(주먹 쥐기 사이 간격) 추정 ----
-    # 기준값으로 mid를 잡고, mid를 아래→위로 넘어갈 때를 "주먹 쥐기" 이벤트로 간주
+    # 제스처 주기 추정
     mid = baseline + delta * 0.5
-
     crossings = []
     prev_ir = ir_list[0]
-    prev_t = time_list[0]
+    prev_t = t_list[0]
 
-    for t, ir in zip(time_list[1:], ir_list[1:]):
-        if prev_ir < mid <= ir:  # 아래에서 위로 교차 (rising edge)
+    for t, ir in zip(t_list[1:], ir_list[1:]):
+        if prev_ir < mid <= ir:  # 아래→위 교차 (주먹 쥐기 시작 근사)
             crossings.append(t)
         prev_ir = ir
         prev_t = t
@@ -97,84 +118,120 @@ def calibrate_ir():
         intervals = [t2 - t1 for t1, t2 in zip(crossings, crossings[1:])]
         intervals_sorted = sorted(intervals)
         median_interval = intervals_sorted[len(intervals_sorted) // 2]
-        MIN_GESTURE_INTERVAL = median_interval * 0.6
+        min_interval = median_interval * 0.6
     else:
-        # 주먹 한두 번만 쥐었을 경우: 그냥 대략값
-        MIN_GESTURE_INTERVAL = 0.5
+        min_interval = 0.5  # 데이터가 적으면 기본값
 
-    print("\n=== 캘리브레이션 결과 ===")
+    print("=== 캘리브레이션 완료 ===")
     print(f"baseline IR ≈ {baseline:.1f}")
     print(f"peak IR ≈ {peak:.1f}")
     print(f"delta ≈ {delta:.1f}")
-    print(f"THRESH_HIGH ≈ {THRESH_HIGH:.1f}")
-    print(f"THRESH_LOW  ≈ {THRESH_LOW:.1f}")
-    print(f"MIN_GESTURE_INTERVAL ≈ {MIN_GESTURE_INTERVAL:.3f} s")
-    print("=====================================\n")
+    print(f"THRESH_HIGH ≈ {TH:.1f}")
+    print(f"THRESH_LOW  ≈ {TL:.1f}")
+    print(f"MIN_GESTURE_INTERVAL ≈ {min_interval:.3f} s")
+    print("==========================\n")
 
-    return baseline, THRESH_HIGH, THRESH_LOW, MIN_GESTURE_INTERVAL
+    return baseline, TH, TL, min_interval
 
 
-# ==== 1) 캘리브레이션 실행 ====
-calib_result = calibrate_ir()
-if calib_result is None:
-    raise SystemExit("캘리브레이션 실패. 다시 실행해 주세요.")
-
-baseline_ir, THRESH_HIGH, THRESH_LOW, MIN_GESTURE_INTERVAL = calib_result
-
-# baseline은 이후에 천천히 업데이트할 수도 있어서
-# 여기서는 초기값으로만 사용
-ALPHA_BASELINE = 0.01
-
-# ==== 2) 실시간 FIST 제스처 감지 모드 ====
-
-state = "IDLE"
-last_trigger_time = 0.0
-
-print("실시간 FIST 인식 시작!")
-print("주먹을 쥐었다가 펴면 space 키를 입력합니다.\n")
+print("모드: WAIT_TRIGGER")
+print(f"센서 착용 후, 빠르게 주먹을 {TRIGGER_COUNT}번 쥐었다 폈다 하면 캘리브레이션을 시작합니다.\n")
 
 while True:
-    data, addr = sock.recvfrom(1024)
-    msg = data.decode("utf-8", errors="ignore").strip()
-    parts = msg.split(",")
+    if mode == "WAIT_TRIGGER":
+        # === 트리거 대기 모드: 대략적인 FSM으로 FIST 3회 감지 ===
+        t_ms, ir = recv_one_packet()
+        if t_ms is None:
+            continue
 
-    if len(parts) != 11:
-        continue
+        if ir < MIN_IR_CONTACT:
+            # 접촉 끊긴 경우
+            pre_state = "IDLE"
+            pre_baseline_ir = None
+            continue
 
-    try:
-        t_ms = int(parts[0])
-        ir = int(parts[7])
-    except ValueError:
-        continue
+        # baseline 갱신
+        if pre_baseline_ir is None:
+            pre_baseline_ir = ir
+        elif pre_state == "IDLE":
+            pre_baseline_ir = (1 - PRE_ALPHA_BASELINE) * pre_baseline_ir + PRE_ALPHA_BASELINE * ir
 
-    if ir < MIN_IR_CONTACT:
-        # 접촉 끊기면 초기화
-        state = "IDLE"
-        # baseline을 완전히 리셋하고 싶다면 아래 주석 해제
-        # baseline_ir = None
-        continue
+        now = time.time()
 
-    # baseline 업데이트 (IDLE 상태일 때만)
-    if state == "IDLE":
-        baseline_ir = (1 - ALPHA_BASELINE) * baseline_ir + ALPHA_BASELINE * ir
+        # 간단 FSM
+        if pre_state == "IDLE":
+            if ir > pre_baseline_ir + PRE_THRESH_HIGH:
+                pre_state = "FIST"
+                # print(f"[PRE FIST START] IR={ir}, baseline={pre_baseline_ir:.1f}")
+        elif pre_state == "FIST":
+            if ir < pre_baseline_ir + PRE_THRESH_LOW:
+                # 한 번의 FIST 완료
+                if now - pre_last_trigger_time > PRE_MIN_GESTURE_INTERVAL:
+                    pre_last_trigger_time = now
+                    trigger_times.append(now)
+                    # 오래된 트리거 제거
+                    trigger_times = [t for t in trigger_times if now - t <= TRIGGER_WINDOW]
+                    print(f"[PRE FIST] count={len(trigger_times)} IR={ir}")
+                pre_state = "IDLE"
 
-    now = time.time()
+        # 3회 이상 감지되면 캘리 시작
+        if len(trigger_times) >= TRIGGER_COUNT:
+            print("\n>>> 트리플 FIST 감지! IR 캘리브레이션을 시작합니다.")
+            calib = calibrate_ir()
+            trigger_times.clear()
 
-    # 상태머신
-    if state == "IDLE":
-        if ir > baseline_ir + THRESH_HIGH:
-            state = "FIST"
-            print(f"[FIST START] IR={ir}, baseline={baseline_ir:.1f}")
+            if calib is None:
+                print("캘리브레이션 실패. 다시 트리플 FIST를 해주세요.\n")
+                continue
 
-    elif state == "FIST":
-        if ir < baseline_ir + THRESH_LOW:
-            if now - last_trigger_time > MIN_GESTURE_INTERVAL:
-                keyboard.press_and_release("space")
-                last_trigger_time = now
-                print(f"[FIST GESTURE] SPACE! IR={ir}, baseline={baseline_ir:.1f}")
-            else:
-                print(f"[FIST IGNORED - TOO FAST] IR={ir}")
+            baseline_ir, THRESH_HIGH, THRESH_LOW, MIN_GESTURE_INTERVAL = calib
             state = "IDLE"
+            last_trigger_time = 0.0
 
-    # 디버깅 보고 싶으면 주석 해제
-    # print(f"IR={ir}, baseline={baseline_ir:.1f}, state={state}")
+            mode = "RUN"
+            print("모드: RUN (주먹 쥐었다-폈다 → space 입력)\n")
+
+    elif mode == "RUN":
+        # === 실전 모드: 캘리한 값을 사용해 FIST → space ===
+        data, addr = sock.recvfrom(1024)
+        msg = data.decode("utf-8", errors="ignore").strip()
+        parts = msg.split(",")
+
+        if len(parts) != 11:
+            continue                                        
+
+        try:
+            t_ms = int(parts[0])
+            ir = int(parts[7])
+        except ValueError:
+            continue
+
+        if ir < MIN_IR_CONTACT:
+            state = "IDLE"
+            continue
+
+        # baseline 갱신 (IDLE 상태에서만)
+        if baseline_ir is None:
+            baseline_ir = ir
+        elif state == "IDLE":
+            baseline_ir = (1 - ALPHA_BASELINE) * baseline_ir + ALPHA_BASELINE * ir
+
+        now = time.time()
+
+        if state == "IDLE":
+            if ir > baseline_ir + THRESH_HIGH:
+                state = "FIST"
+                print(f"[FIST START] IR={ir}, baseline={baseline_ir:.1f}")
+
+        elif state == "FIST":
+            if ir < baseline_ir + THRESH_LOW:
+                if now - last_trigger_time > MIN_GESTURE_INTERVAL:
+                    keyboard.press_and_release("space")
+                    last_trigger_time = now
+                    print(f"[FIST GESTURE] SPACE! IR={ir}, baseline={baseline_ir:.1f}")
+                else:
+                    print(f"[FIST IGNORED - TOO FAST] IR={ir}")
+                state = "IDLE"
+
+        # 디버깅 원하면:
+        # print(f"IR={ir}, baseline={baseline_ir:.1f}, state={state}")
