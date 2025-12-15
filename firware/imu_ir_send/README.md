@@ -55,3 +55,30 @@ const char* ssid       = "YOUR_WIFI_SSID";
 const char* password   = "YOUR_WIFI_PASSWORD";
 const char* udpAddress = "PC_IP_ADDRESS";
 const int   udpPort    = 9000;
+---
+
+## Network Debugging and Validation
+
+Before running this firmware, it is **strongly recommended**
+to verify Wi-Fi and UDP communication using the
+[`wifi_udp_send`](../wifi_udp_send) firmware.
+
+This step helps isolate network-related issues
+before introducing sensor processing complexity.
+
+### Recommended Procedure
+
+1. Upload the `wifi_udp_send.ino` firmware to the ESP8266
+2. On the host PC, run the following script:
+
+   - **[`test_wifi.py`](../../host/test_wifi.py)**
+
+3. Confirm that the message `"HELLO_FROM_D1_MINI"` is received repeatedly
+4. If packets are not received, check:
+   - Wi-Fi SSID and password
+   - Host PC IP address
+   - UDP port number
+   - Firewall or network isolation settings
+
+Once basic UDP communication is confirmed,
+switch to `imu_ir_send.ino` for full sensor-integrated testing.
